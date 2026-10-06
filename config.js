@@ -14,7 +14,6 @@ module.exports = {
   receiver: env.RECEIVER_WALLET || '6s88p25hjVgESfoa9mSwqwmyDV2AT2hrVWgGZ6SLiTt7',
   // Password for /admin.html, where round winners are listed and payouts are marked as sent.
   adminToken: env.ADMIN_TOKEN || '',
-  dbPath: env.DB_PATH || './crossy.db',
 
   entryLamports: sol(env.ENTRY_SOL || '0.05'),          // price of one ranked run, added to the pool
   basePoolLamports: sol(env.BASE_POOL_SOL || '2'),      // added to every round's prize; you pay it by hand

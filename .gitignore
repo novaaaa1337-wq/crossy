@@ -5,3 +5,6 @@ e2e-player.json
 *.db
 *.db-shm
 *.db-wal
+.pglite/
+public/vendor/
+.vercel/

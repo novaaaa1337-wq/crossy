@@ -422,7 +422,7 @@ async function confirmPending() {
   const p = store.get('pending', null);
   if (!p) return null;
   busy('Confirming on Solana');
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 12; i++) {
     let r;
     try { r = await api('/api/confirm', { intentId: p.intentId, signature: p.signature }); }
     catch (e) { if (e.status && e.status < 500) store.set('pending', null); throw e; }
@@ -629,18 +629,15 @@ function setPaused(v) {
 let roundInfo = null, serverOffset = 0;
 function applyRound(r) { serverOffset = r.now - Date.now(); roundInfo = r; renderRound(); }
 async function pollRound() {
-  try { applyRound(await api('/api/round')); } catch (e) {}
+  try { applyRound(await api('/api/round')); }
+  catch (e) { if (e.status === 503 && state === 'menu') showMsg(e.message); }
 }
-// The server pushes the round (pool, leaderboard, timer, payouts) the moment anything changes.
-// If the live stream is down, fall back to asking every 5 seconds.
-let live = null;
+// Everyone sees the same pool, leaderboard and payouts: the page refreshes the round every
+// 2 seconds while it is visible, and right away when the tab comes back into view.
 function startLive() {
   pollRound();
-  if (window.EventSource) {
-    live = new EventSource('/api/stream');
-    live.onmessage = e => { try { applyRound(JSON.parse(e.data)); } catch (err) {} };
-  }
-  setInterval(() => { if (!live || live.readyState !== 1) pollRound(); }, 5000);
+  setInterval(() => { if (!document.hidden) pollRound(); }, 2000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollRound(); });
 }
 function renderRound() {
   const r = roundInfo;

@@ -11,7 +11,8 @@ Characters (skins) are bought with SOL.
 | Game rules | `public/sim.js` | Deterministic 60 Hz simulation shared by browser and server |
 | Game client | `public/app.js`, `index.html`, `style.css` | Three.js rendering, built-in wallet, menus, leaderboard |
 | Admin page | `public/admin.html` | Lists each round's winner and marks prizes as paid |
-| Server | `server.js`, `config.js` | Builds payments, checks them on chain, replays runs, records winners |
+| API | `lib/app.js`, `lib/db.js`, `config.js` | Builds payments, checks them on chain, replays runs, records winners |
+| Entry points | `api/index.js` (Vercel), `local-server.js` (anywhere else) | Run the same API |
 
 **Wallets.** Every player gets a Solana wallet made in their browser on first visit. The private key is stored only in
 that browser and never reaches the server. Players add SOL by sending it to their address, and can withdraw, export
@@ -23,9 +24,8 @@ The server builds each transfer with a unique reference key, the browser signs i
 chain before handing out a run ticket or a character. Each signature can only be used once. Characters must be
 owned to be played, in practice and in ranked, and the server checks ownership when a ranked run starts.
 
-**Live updates.** Every open page holds a live stream (`/api/stream`). Pool, timer, leaderboard and payouts are
-pushed to everyone the moment they change. If the stream drops, the page asks every 5 seconds instead.
-Rounds are numbered from #1, starting with the round the server first ran in.
+**Live updates.** Every open page refreshes the round every 2 seconds, and right away when the tab comes back,
+so pool, timer, leaderboard and payouts stay in step for everyone. Rounds are numbered from #1, starting with the round the server first ran in.
 
 **Scoring.** Each ranked run gets a secret seed from the server when the player presses start. The browser records
 only the player's inputs (tick number and direction). On submit, the server replays those inputs on the same
@@ -44,45 +44,36 @@ Until then, players see "Prize is being sent" under the previous round.
 
 ## Run it locally
 
-Needs Node 22.13 or newer.
+Needs Node 22 or newer. With no `DATABASE_URL`, a built-in Postgres keeps data in `./.pglite`.
 
 ```bash
 npm install
 cp .env.example .env      # set ADMIN_TOKEN to a long random string
 npm start                 # http://localhost:3000
-```
-
-```bash
 npm test                  # replay determinism and forgery checks (no network)
 ```
 
-## Going live on crossy.fun
+## Deploy on Vercel
 
-Crossy is a long-running server with a database file and live connections.
-**It does not run on Vercel or other serverless hosts.** Those stop the server between requests and wipe its files,
-so tickets, scores and owned characters would disappear.
-Use a host that keeps a process running and gives it a disk: Railway, Render (with a disk) or Fly.io.
+1. Import the GitHub repo in Vercel. `vercel.json` already sets the build, the static site (`public/`) and the API
+   function (`api/index.js`). Leave the framework preset as Other.
+2. In the project, open **Storage**, create a **Neon** Postgres database and connect it to the project.
+   That adds `DATABASE_URL` for you. Without it the game still loads, but the page says "No database connected".
+3. In **Settings → Environment Variables**, add:
+   - `ADMIN_TOKEN`: a long random password for `/admin.html`
+   - `RPC_URL`: your paid Solana RPC URL (Helius, Triton, QuickNode). The public one is rate-limited.
+   - optional: `RECEIVER_WALLET`, `ENTRY_SOL`, `BASE_POOL_SOL`, `ROUND_MINUTES` and skin prices (see `.env.example`)
+4. Redeploy (Deployments → latest → Redeploy) so the new variables apply.
+5. Add `crossy.fun` under **Settings → Domains**.
 
-### Railway
+To check it: `/api/config` returns JSON, and `/api/round` shows round #1 with a 2 SOL pool.
 
-1. On railway.com: New Project, then Deploy from GitHub repo, and pick this repo. It runs `npm start` on its own.
-2. Open the service, then Settings, then Volumes, and add a volume mounted at `/data`.
-3. Under Variables, add:
-   - `DB_PATH=/data/crossy.db`
-   - `CLUSTER=mainnet-beta`
-   - `RPC_URL=` your paid RPC URL (Helius, Triton, QuickNode)
-   - `RECEIVER_WALLET=6s88p25hjVgESfoa9mSwqwmyDV2AT2hrVWgGZ6SLiTt7`
-   - `ADMIN_TOKEN=` a long random password for `/admin.html`
-   - `NODE_VERSION=22` if the build picks an older Node
-4. Settings, then Networking: add the custom domain `crossy.fun` and create the DNS record Railway shows at your
-   domain registrar. Remove the domain from Vercel first.
-5. Check the deploy logs for `Crossy running`.
+Other hosts (Railway, Render, a VPS) also work: set `DATABASE_URL` and run `npm start`.
 
 ### Before opening it up
 
 - Play one cheap round first: set `ENTRY_SOL=0.001` and `BASE_POOL_SOL=0.001`, then deposit, pay, play,
   pay yourself from `/admin.html` and withdraw. Then set the real prices.
-- Back up `/data/crossy.db`. It holds tickets, runs, character ownership and the list of prizes owed.
 
 ## Before real money goes in
 
