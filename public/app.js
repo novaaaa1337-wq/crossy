@@ -626,11 +626,30 @@ function setPaused(v) {
 }
 
 /* ---------- round + leaderboard ---------- */
-let roundInfo = null, serverOffset = 0;
-function applyRound(r) { serverOffset = r.now - Date.now(); roundInfo = r; renderRound(); }
+let roundInfo = null, serverOffset = 0, roundError = '';
+function applyRound(r) {
+  if (roundError && $('msg').textContent === roundError) showMsg('');
+  serverOffset = r.now - Date.now(); roundInfo = r; roundError = ''; renderRound();
+}
+// What the round looks like before the server answers, or while it can't: the base pool
+// (2 SOL unless configured otherwise) and a countdown to the next 15-minute boundary.
+function offlineRound() {
+  const roundMs = (config && config.roundMs) || 15 * 60000;
+  const t = Date.now() + serverOffset, round = Math.floor(t / roundMs);
+  return {
+    offline: true, now: t, round, number: null, endsAt: (round + 1) * roundMs,
+    poolLamports: (config && config.basePoolLamports) || 2e9, entries: 0, leaderboard: [],
+    prev: { winner: null, number: null },
+  };
+}
 async function pollRound() {
   try { applyRound(await api('/api/round')); }
-  catch (e) { if (e.status === 503 && state === 'menu') showMsg(e.message); }
+  catch (e) {
+    roundError = e.status === 503 ? e.message
+      : 'The leaderboard server is not answering right now. Ranked play is paused until it is back.';
+    if (!roundInfo || roundInfo.offline) { roundInfo = offlineRound(); renderRound(); }
+    if (state === 'menu') showMsg(roundError);
+  }
 }
 // Everyone sees the same pool, leaderboard and payouts: the page refreshes the round every
 // 2 seconds while it is visible, and right away when the tab comes back into view.
@@ -643,7 +662,16 @@ function renderRound() {
   const r = roundInfo;
   if (!r) return;
   $('pool').textContent = fmtSol(r.poolLamports);
-  $('roundNo').textContent = '#' + r.number;
+  $('roundNo').textContent = r.number == null ? '' : '#' + r.number;
+  if (r.offline) {
+    $('entries').textContent = '';
+    $('lbList').innerHTML = '';
+    $('lbEmpty').hidden = false;
+    $('lbEmpty').textContent = roundError || 'Loading the leaderboard…';
+    $('prevRound').textContent = '';
+    return;
+  }
+  $('lbEmpty').textContent = 'No ranked scores yet this round. Be first.';
   $('entries').textContent = `${r.entries} ${r.entries === 1 ? 'entry' : 'entries'}`;
   const list = $('lbList'); list.innerHTML = '';
   r.leaderboard.slice(0, 10).forEach((row, i) => {
@@ -668,7 +696,7 @@ function renderRound() {
   } else prev.textContent = p.number >= 1 ? `Round #${p.number} had no ranked runs.` : 'Round #1 is the first round. Good luck.';
 }
 function renderTimer() {
-  if (!roundInfo) return;
+  if (!roundInfo || (roundInfo.offline && Date.now() + serverOffset >= roundInfo.endsAt)) { roundInfo = offlineRound(); renderRound(); }
   const left = Math.max(0, roundInfo.endsAt - (Date.now() + serverOffset));
   const m = Math.floor(left / 60000), s = Math.floor(left / 1000) % 60;
   const el = $('timer');
