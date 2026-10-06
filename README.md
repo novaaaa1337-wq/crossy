@@ -60,13 +60,36 @@ npm run e2e               # full paid run on devnet against the running server (
 
 ## Going live on crossy.fun
 
-1. Run it on a host that keeps a long-running Node process and a disk (a VPS, Fly.io, Railway, Render with a disk).
-   Put it behind HTTPS. Wallets refuse to connect to plain HTTP pages.
-2. Create a fresh treasury keypair just for this and keep its file off the web root and out of git.
-   Keep only what you need for upcoming payouts in it and move the rest out regularly.
-3. Use a paid RPC provider (Helius, Triton, QuickNode). The public mainnet endpoint is rate-limited.
-4. Set `CLUSTER=mainnet-beta` and `RPC_URL` in `.env`, restart, and do a few small real runs first.
-5. Back up `crossy.db`. It holds tickets, runs, skin ownership and payout records.
+Crossy is a long-running server with a database file, a payout timer and live connections.
+**It does not run on Vercel or other serverless hosts.** Those stop the server between requests and wipe its files.
+Use a host that keeps a process running and gives it a disk: Railway, Render (with a disk) or Fly.io.
+
+### Railway
+
+1. railway.com, then New Project, then Deploy from GitHub repo, and pick this repo. It runs Unknown command: "start"
+
+
+Did you mean one of these?
+  npm star # Mark your favorite packages
+  npm stars # View packages marked as favorites
+  npm start # Start a package
+To see a list of supported npm commands, run:
+  npm help on its own.
+2. Open the service, then Settings, then Volumes, and add a volume mounted at .
+3. Under Variables, add:
+   -    -    -  your paid RPC URL (Helius, Triton, QuickNode)
+   -    -  the prize wallet's private key (base58, as exported from Phantom)
+   -  if the build picks an older Node
+4. Settings, then Networking: add the custom domain  and create the DNS record Railway shows at your domain registrar.
+   Remove the domain from Vercel first.
+5. Check the deploy logs for  and the two wallet addresses.
+
+### Before opening it up
+
+- Fund the treasury wallet with enough SOL for upcoming pools, and keep only that much in it.
+- Play one cheap round first: set  and , then deposit, pay, play,
+  wait for the payout and withdraw. Then set the real prices.
+- Back up . It holds tickets, runs, character ownership and payout records.
 
 ## Before real money goes in
 

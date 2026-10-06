@@ -8,15 +8,33 @@ const Sim = require('./public/sim.js');
 const cfg = require('./config');
 
 /* ---------- setup ---------- */
-function loadKeypair(file) {
-  const p = path.resolve(__dirname, file);
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function base58Decode(str) {
+  let n = 0n;
+  for (const c of str) { const i = B58.indexOf(c); if (i < 0) throw new Error('invalid base58'); n = n * 58n + BigInt(i); }
+  const out = [];
+  while (n > 0n) { out.unshift(Number(n % 256n)); n /= 256n; }
+  for (const c of str) { if (c === '1') out.unshift(0); else break; }
+  return Uint8Array.from(out);
+}
+// The treasury key can come from the TREASURY_SECRET environment variable (base58 or a JSON array,
+// which is what hosting dashboards are for) or from a keypair file.
+function loadKeypair() {
+  const secret = (process.env.TREASURY_SECRET || '').trim();
+  try {
+    if (secret) return web3.Keypair.fromSecretKey(secret.startsWith('[') ? Uint8Array.from(JSON.parse(secret)) : base58Decode(secret));
+  } catch (e) {
+    console.error('TREASURY_SECRET is set but is not a valid Solana private key.');
+    process.exit(1);
+  }
+  const p = path.resolve(__dirname, cfg.treasuryKeypair);
   if (!fs.existsSync(p)) {
-    console.error(`Treasury keypair not found at ${p}. Run "npm run setup:devnet" or set TREASURY_KEYPAIR.`);
+    console.error(`No treasury key. Set TREASURY_SECRET, or put a keypair file at ${p}.`);
     process.exit(1);
   }
   return web3.Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(p, 'utf8'))));
 }
-const treasury = loadKeypair(cfg.treasuryKeypair);
+const treasury = loadKeypair();
 let receiver;
 try { receiver = new web3.PublicKey(cfg.receiver); } catch {
   console.error(`RECEIVER_WALLET "${cfg.receiver}" is not a valid Solana address.`);
@@ -95,7 +113,6 @@ function parseWallet(w) {
   try { const pk = new web3.PublicKey(w); return pk.toBase58() === w ? pk : null; } catch { return null; }
 }
 
-const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function base58(buf) {
   let n = BigInt('0x' + (Buffer.from(buf).toString('hex') || '0'));
   let s = '';
