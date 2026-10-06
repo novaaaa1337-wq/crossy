@@ -66,30 +66,25 @@ Use a host that keeps a process running and gives it a disk: Railway, Render (wi
 
 ### Railway
 
-1. railway.com, then New Project, then Deploy from GitHub repo, and pick this repo. It runs Unknown command: "start"
-
-
-Did you mean one of these?
-  npm star # Mark your favorite packages
-  npm stars # View packages marked as favorites
-  npm start # Start a package
-To see a list of supported npm commands, run:
-  npm help on its own.
-2. Open the service, then Settings, then Volumes, and add a volume mounted at .
+1. On railway.com: New Project, then Deploy from GitHub repo, and pick this repo. It runs `npm start` on its own.
+2. Open the service, then Settings, then Volumes, and add a volume mounted at `/data`.
 3. Under Variables, add:
-   -    -    -  your paid RPC URL (Helius, Triton, QuickNode)
-   -    -  the prize wallet's private key (base58, as exported from Phantom)
-   -  if the build picks an older Node
-4. Settings, then Networking: add the custom domain  and create the DNS record Railway shows at your domain registrar.
-   Remove the domain from Vercel first.
-5. Check the deploy logs for  and the two wallet addresses.
+   - `DB_PATH=/data/crossy.db`
+   - `CLUSTER=mainnet-beta`
+   - `RPC_URL=` your paid RPC URL (Helius, Triton, QuickNode)
+   - `RECEIVER_WALLET=6s88p25hjVgESfoa9mSwqwmyDV2AT2hrVWgGZ6SLiTt7`
+   - `TREASURY_SECRET=` the prize wallet's private key (base58, as exported from Phantom)
+   - `NODE_VERSION=22` if the build picks an older Node
+4. Settings, then Networking: add the custom domain `crossy.fun` and create the DNS record Railway shows at your
+   domain registrar. Remove the domain from Vercel first.
+5. Check the deploy logs for `Crossy running` and the two wallet addresses.
 
 ### Before opening it up
 
 - Fund the treasury wallet with enough SOL for upcoming pools, and keep only that much in it.
-- Play one cheap round first: set  and , then deposit, pay, play,
+- Play one cheap round first: set `ENTRY_SOL=0.001` and `BASE_POOL_SOL=0.001`, then deposit, pay, play,
   wait for the payout and withdraw. Then set the real prices.
-- Back up . It holds tickets, runs, character ownership and payout records.
+- Back up `/data/crossy.db`. It holds tickets, runs, character ownership and payout records.
 
 ## Before real money goes in
 
