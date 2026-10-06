@@ -1,5 +1,4 @@
 const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const { DatabaseSync } = require('node:sqlite');
@@ -8,33 +7,6 @@ const Sim = require('./public/sim.js');
 const cfg = require('./config');
 
 /* ---------- setup ---------- */
-const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-function base58Decode(str) {
-  let n = 0n;
-  for (const c of str) { const i = B58.indexOf(c); if (i < 0) throw new Error('invalid base58'); n = n * 58n + BigInt(i); }
-  const out = [];
-  while (n > 0n) { out.unshift(Number(n % 256n)); n /= 256n; }
-  for (const c of str) { if (c === '1') out.unshift(0); else break; }
-  return Uint8Array.from(out);
-}
-// The treasury key can come from the TREASURY_SECRET environment variable (base58 or a JSON array,
-// which is what hosting dashboards are for) or from a keypair file.
-function loadKeypair() {
-  const secret = (process.env.TREASURY_SECRET || '').trim();
-  try {
-    if (secret) return web3.Keypair.fromSecretKey(secret.startsWith('[') ? Uint8Array.from(JSON.parse(secret)) : base58Decode(secret));
-  } catch (e) {
-    console.error('TREASURY_SECRET is set but is not a valid Solana private key.');
-    process.exit(1);
-  }
-  const p = path.resolve(__dirname, cfg.treasuryKeypair);
-  if (!fs.existsSync(p)) {
-    console.error(`No treasury key. Set TREASURY_SECRET, or put a keypair file at ${p}.`);
-    process.exit(1);
-  }
-  return web3.Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(p, 'utf8'))));
-}
-const treasury = loadKeypair();
 let receiver;
 try { receiver = new web3.PublicKey(cfg.receiver); } catch {
   console.error(`RECEIVER_WALLET "${cfg.receiver}" is not a valid Solana address.`);
@@ -96,8 +68,9 @@ const q = {
   addOwned: db.prepare('INSERT OR IGNORE INTO owned (wallet, skin) VALUES (?, ?)'),
   payout: db.prepare('SELECT * FROM payouts WHERE round = ?'),
   addPayout: db.prepare('INSERT OR IGNORE INTO payouts (round, winner, score, lamports, status, updated) VALUES (?, ?, ?, ?, ?, ?)'),
-  openPayouts: db.prepare("SELECT * FROM payouts WHERE status IN ('pending', 'sending') ORDER BY round"),
-  setPayout: db.prepare('UPDATE payouts SET status = ?, signature = ?, last_valid = ?, error = ?, updated = ? WHERE round = ?'),
+  recentPayouts: db.prepare("SELECT * FROM payouts WHERE status != 'no_runs' ORDER BY round DESC LIMIT 200"),
+  payoutBySig: db.prepare('SELECT round FROM payouts WHERE signature = ?'),
+  markPaid: db.prepare("UPDATE payouts SET status = 'paid', signature = ?, updated = ? WHERE round = ? AND status = 'owed'"),
   unsettledRounds: db.prepare("SELECT DISTINCT round FROM tickets WHERE round IS NOT NULL AND round <= ? AND round NOT IN (SELECT round FROM payouts)"),
 };
 
@@ -111,14 +84,6 @@ const roundClosedForRuns = round => !!q.payout.get(round);
 function parseWallet(w) {
   if (typeof w !== 'string' || w.length > 50) return null;
   try { const pk = new web3.PublicKey(w); return pk.toBase58() === w ? pk : null; } catch { return null; }
-}
-
-function base58(buf) {
-  let n = BigInt('0x' + (Buffer.from(buf).toString('hex') || '0'));
-  let s = '';
-  while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; }
-  for (const b of buf) { if (b === 0) s = '1' + s; else break; }
-  return s;
 }
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
@@ -422,65 +387,70 @@ app.post('/api/run', limit, wrap(async (req, res) => {
   res.json({ ok: true, score: rep.score, round: t.round, rank, best: mine ? mine.score : rep.score });
 }));
 
-/* ---------- payouts ---------- */
-let settling = false;
-async function settle() {
-  if (settling) return;
-  settling = true;
+/* ---------- payouts (sent by hand) ----------
+ * When a round is final, the server records the winner and what they are owed. The owner sends
+ * the SOL from their own wallet, then pastes the transaction on /admin.html to mark it paid. */
+function settle() {
   try {
     const lastClosed = roundOf(now() - cfg.settleDelayMs) - 1;
+    let added = false;
     for (const { round } of q.unsettledRounds.all(lastClosed)) {
       const top = leaderboard(round, 1)[0];
-      if (top) q.addPayout.run(round, top.wallet, top.score, poolFor(round), 'pending', now());
-      else q.addPayout.run(round, null, null, 0, 'no_runs', now());
+      if (top) {
+        q.addPayout.run(round, top.wallet, top.score, poolFor(round), 'owed', now());
+        console.log(`Round #${roundNumber(round)} won by ${top.wallet} with ${top.score}. Owed ${poolFor(round) / 1e9} SOL.`);
+      } else q.addPayout.run(round, null, null, 0, 'no_runs', now());
+      added = true;
     }
-    for (const p of q.openPayouts.all()) await pay(p);
-    broadcast();
+    if (added) broadcast(true);
   } catch (e) {
     console.error('Settlement error:', e.message);
-  } finally {
-    settling = false;
   }
 }
 
-async function pay(p) {
-  // A transfer may already be in flight from an earlier attempt. Never send a second one
-  // until the first is confirmed failed or its blockhash has expired.
-  if (p.status === 'sending' && p.signature) {
-    const st = (await conn.getSignatureStatus(p.signature, { searchTransactionHistory: true })).value;
-    if (st && !st.err && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
-      q.setPayout.run('paid', p.signature, p.last_valid, null, now(), p.round);
-      console.log(`Round ${p.round}: paid ${p.lamports / 1e9} SOL to ${p.winner} (${p.signature})`);
-      return;
-    }
-    if (!st || !st.err) {
-      const height = await conn.getBlockHeight('confirmed');
-      if (height <= p.last_valid) return; // still able to land; check again next pass
-    }
-    q.setPayout.run('pending', null, null, st && st.err ? JSON.stringify(st.err) : 'expired, retrying', now(), p.round);
+function requireAdmin(req, res, next) {
+  if (!cfg.adminToken) return res.status(503).json({ error: 'Set ADMIN_TOKEN on the server to use the admin page.' });
+  const given = Buffer.from(String(req.get('authorization') || '').replace(/^Bearer /, ''));
+  const want = Buffer.from(cfg.adminToken);
+  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
+    return res.status(401).json({ error: 'Wrong admin password.' });
   }
-
-  const balance = await conn.getBalance(treasury.publicKey);
-  if (balance < p.lamports + 10000) {
-    q.setPayout.run('pending', null, null, `Treasury balance too low (${balance / 1e9} SOL)`, now(), p.round);
-    console.error(`Round ${p.round}: treasury has ${balance / 1e9} SOL, needs ${p.lamports / 1e9}. Top it up.`);
-    return;
-  }
-  const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
-  const tx = new web3.Transaction({ feePayer: treasury.publicKey, blockhash, lastValidBlockHeight })
-    .add(web3.SystemProgram.transfer({ fromPubkey: treasury.publicKey, toPubkey: new web3.PublicKey(p.winner), lamports: p.lamports }));
-  tx.sign(treasury);
-  const sig = base58(tx.signature);
-  q.setPayout.run('sending', sig, lastValidBlockHeight, null, now(), p.round);
-  try {
-    await conn.sendRawTransaction(tx.serialize());
-    await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
-    q.setPayout.run('paid', sig, lastValidBlockHeight, null, now(), p.round);
-    console.log(`Round ${p.round}: paid ${p.lamports / 1e9} SOL to ${p.winner} (${sig})`);
-  } catch (e) {
-    console.error(`Round ${p.round}: payout not confirmed yet (${e.message}). Will re-check.`);
-  }
+  next();
 }
+app.get('/api/admin/payouts', limit, requireAdmin, (req, res) => {
+  res.json({
+    cluster: cfg.cluster,
+    payouts: q.recentPayouts.all().map(p => ({
+      round: p.round, number: roundNumber(p.round), winner: p.winner, score: p.score,
+      lamports: p.lamports, status: p.status, signature: p.signature,
+      closedAt: (p.round + 1) * cfg.roundMs,
+    })),
+  });
+});
+// Checks on chain that the pasted transaction really sent at least the owed amount to the winner.
+app.post('/api/admin/payouts/:round/paid', limit, requireAdmin, wrap(async (req, res) => {
+  const round = Number(req.params.round);
+  const p = Number.isInteger(round) && q.payout.get(round);
+  if (!p) throw new HttpError(404, 'No payout for that round.');
+  if (p.status !== 'owed') throw new HttpError(409, 'That round is already marked paid.');
+  const signature = String((req.body || {}).signature || '').trim();
+  if (signature.length < 60 || signature.length > 100) throw new HttpError(400, 'Paste the transaction signature from your wallet or Solscan.');
+  const other = q.payoutBySig.get(signature);
+  if (other) throw new HttpError(409, `That transaction is already used for round #${roundNumber(other.round)}.`);
+  const tx = await waitForTx(signature, 20000);
+  if (!tx) throw new HttpError(400, 'That transaction was not found on chain yet. Wait a few seconds and try again.');
+  if (tx.meta && tx.meta.err) throw new HttpError(400, 'That transaction failed on chain.');
+  const msg = tx.transaction.message;
+  const keys = (msg.staticAccountKeys || msg.accountKeys).map(k => k.toBase58());
+  const wi = keys.indexOf(p.winner);
+  const got = wi >= 0 ? tx.meta.postBalances[wi] - tx.meta.preBalances[wi] : 0;
+  if (got < p.lamports) {
+    throw new HttpError(400, `That transaction sent ${Math.max(0, got) / 1e9} SOL to the winner, but ${p.lamports / 1e9} SOL is owed.`);
+  }
+  q.markPaid.run(signature, now(), round);
+  broadcast(true);
+  res.json({ ok: true });
+}));
 
 setInterval(settle, 15000);
 settle();
@@ -489,6 +459,6 @@ app.listen(cfg.port, () => {
   console.log(`Crossy running on http://localhost:${cfg.port}`);
   console.log(`Cluster: ${cfg.cluster}`);
   console.log(`Payments go to: ${receiver.toBase58()}`);
-  console.log(`Prizes paid from treasury: ${treasury.publicKey.toBase58()}`);
+  console.log(`Prizes are paid by hand from /admin.html${cfg.adminToken ? '' : ' (set ADMIN_TOKEN to enable it)'}`);
   console.log(`Entry ${cfg.entryLamports / 1e9} SOL, base pool ${cfg.basePoolLamports / 1e9} SOL, rounds every ${cfg.roundMs / 60000} min`);
 });

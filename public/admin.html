@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Crossy Payouts</title>
+<style>
+  :root { --bg: #141a2b; --panel: #1c2440; --line: rgba(255,250,240,.14); --fg: #fffaf0; --muted: rgba(255,250,240,.62); --gold: #ffc83d; --sol: #3cf0a8; --hot: #ff5a4e; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; padding: 24px 16px; }
+  main { max-width: 860px; margin: 0 auto; display: grid; gap: 16px; }
+  h1 { margin: 0; font-size: 24px; }
+  p { margin: 0; color: var(--muted); }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; }
+  input { flex: 1; min-width: 0; background: rgba(0,0,0,.3); border: 2px solid var(--line); border-radius: 10px; color: var(--fg); padding: 9px 12px; font: 14px ui-monospace, Consolas, monospace; }
+  input:focus { outline: none; border-color: var(--gold); }
+  button { border: none; border-radius: 10px; padding: 9px 14px; font-weight: 700; cursor: pointer; background: var(--gold); color: #141a2b; }
+  button.soft { background: rgba(255,250,240,.12); color: var(--fg); }
+  .card { background: var(--panel); border: 2px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 10px; }
+  .card.owed { border-color: var(--gold); }
+  .top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+  .amt { font-size: 22px; font-weight: 800; color: var(--sol); font-variant-numeric: tabular-nums; }
+  .pill { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; }
+  .pill.owed { background: var(--gold); color: #141a2b; }
+  .pill.paid { background: rgba(60,240,168,.2); color: var(--sol); }
+  code { font: 13px ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+  .addr { display: flex; gap: 8px; align-items: center; background: rgba(0,0,0,.25); border-radius: 10px; padding: 8px 8px 8px 12px; }
+  .addr code { flex: 1; min-width: 0; }
+  .err { color: var(--hot); font-weight: 600; }
+  a { color: var(--sol); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Crossy payouts</h1>
+  <p>Each finished round lists its winner and what they are owed. Send that SOL from your own wallet, then paste the transaction signature here. The server checks it on chain and the site shows the round as paid.</p>
+  <div class="bar">
+    <input id="token" type="password" placeholder="Admin password (ADMIN_TOKEN)" autocomplete="current-password">
+    <button id="load" type="button">Load</button>
+  </div>
+  <p class="err" id="err" hidden></p>
+  <div id="list"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let token = '';
+try { token = sessionStorage.getItem('crossyAdmin') || ''; } catch (e) {}
+$('token').value = token;
+const sol = l => (l / 1e9).toFixed(4).replace(/0+$/, '').replace(/\.$/, '') + ' SOL';
+let cluster = 'mainnet-beta';
+const explorer = sig => `https://solscan.io/tx/${sig}${cluster === 'mainnet-beta' ? '' : '?cluster=' + cluster}`;
+
+async function call(path, body) {
+  const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
+  return j;
+}
+function showErr(m) { $('err').textContent = m || ''; $('err').hidden = !m; }
+
+async function load() {
+  token = $('token').value.trim();
+  try { sessionStorage.setItem('crossyAdmin', token); } catch (e) {}
+  showErr('');
+  let data;
+  try { data = await call('/api/admin/payouts'); } catch (e) { showErr(e.message); return; }
+  cluster = data.cluster;
+  const list = $('list'); list.innerHTML = '';
+  if (!data.payouts.length) { list.innerHTML = '<p>No finished rounds with winners yet.</p>'; return; }
+  const owed = data.payouts.filter(p => p.status === 'owed');
+  const head = document.createElement('p');
+  head.textContent = owed.length ? `${owed.length} round${owed.length > 1 ? 's' : ''} waiting, ${sol(owed.reduce((a, p) => a + p.lamports, 0))} in total.` : 'Everything is paid.';
+  list.append(head);
+  for (const p of data.payouts) list.append(card(p));
+}
+
+function card(p) {
+  const c = document.createElement('section');
+  c.className = 'card ' + p.status;
+  c.innerHTML = `<div class="top"><strong>Round #${p.number}</strong><span class="amt"></span><span class="pill ${p.status}">${p.status === 'owed' ? 'To pay' : 'Paid'}</span></div>
+    <div class="addr"><code class="w"></code><button type="button" class="soft copy">Copy</button></div>
+    <p class="meta"></p>`;
+  c.querySelector('.amt').textContent = sol(p.lamports);
+  c.querySelector('.w').textContent = p.winner;
+  c.querySelector('.meta').textContent = `Score ${p.score}. Round closed ${new Date(p.closedAt).toLocaleString()}.`;
+  c.querySelector('.copy').onclick = e => navigator.clipboard.writeText(p.winner).then(() => { e.target.textContent = 'Copied'; }).catch(() => {});
+  if (p.status === 'owed') {
+    const bar = document.createElement('div'); bar.className = 'bar';
+    bar.innerHTML = '<input placeholder="Transaction signature of your payment" spellcheck="false"><button type="button">Mark paid</button>';
+    const msg = document.createElement('p'); msg.className = 'err'; msg.hidden = true;
+    bar.querySelector('button').onclick = async e => {
+      e.target.disabled = true; e.target.textContent = 'Checking…'; msg.hidden = true;
+      try { await call(`/api/admin/payouts/${p.round}/paid`, { signature: bar.querySelector('input').value }); load(); }
+      catch (err) { msg.textContent = err.message; msg.hidden = false; e.target.disabled = false; e.target.textContent = 'Mark paid'; }
+    };
+    c.append(bar, msg);
+  } else if (p.signature) {
+    const a = document.createElement('a'); a.href = explorer(p.signature); a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'View payment';
+    c.append(a);
+  }
+  return c;
+}
+$('load').onclick = load;
+$('token').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+if (token) load();
+</script>
+</body>
+</html>

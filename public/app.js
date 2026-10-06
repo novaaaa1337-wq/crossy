@@ -667,7 +667,7 @@ function renderRound() {
       a.href = `https://explorer.solana.com/tx/${p.signature}${config && config.cluster !== 'mainnet-beta' ? '?cluster=' + config.cluster : ''}`;
       a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'View payout';
       prev.append(a);
-    } else prev.append(p.status === 'pending' || p.status === 'sending' ? 'Payout is being sent.' : `Paid out about ${Math.max(0, Math.ceil((p.settlesAt - Date.now() - serverOffset) / 60000))} min after the round closes.`);
+    } else prev.append(p.status === 'owed' ? 'Prize is being sent.' : `Paid out about ${Math.max(0, Math.ceil((p.settlesAt - Date.now() - serverOffset) / 60000))} min after the round closes.`);
   } else prev.textContent = p.number >= 1 ? `Round #${p.number} had no ranked runs.` : 'Round #1 is the first round. Good luck.';
 }
 function renderTimer() {

@@ -7,7 +7,6 @@
   "engines": { "node": ">=22.13" },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
-    "setup:devnet": "node --env-file-if-exists=.env scripts/devnet-setup.js",
     "test": "node scripts/test-sim.js",
     "e2e": "node --env-file-if-exists=.env scripts/e2e-devnet.js"
   },
