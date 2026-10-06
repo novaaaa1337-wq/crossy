@@ -1,0 +1,7 @@
+node_modules/
+.env
+treasury.json
+e2e-player.json
+*.db
+*.db-shm
+*.db-wal

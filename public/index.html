@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Crossy</title>
+<meta name="description" content="Hop across roads, rivers and rail lines. The top score each 15-minute round wins the SOL pool.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Chakra+Petch:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="game"></div>
+
+<header class="topbar">
+  <div class="brand">CROSSY <span class="net" id="netBadge" hidden>devnet</span></div>
+  <div class="round" id="roundCard">
+    <span class="lbl">Round pool</span>
+    <b class="sol" id="pool">&ndash;</b>
+    <span class="timer" id="timer">--:--</span>
+  </div>
+  <div class="tb-right">
+    <button type="button" class="chip" id="lbToggle" aria-expanded="false" aria-controls="lb">Leaderboard</button>
+    <button type="button" class="chip wallet on" id="walletBtn">Wallet</button>
+  </div>
+</header>
+
+<aside class="lb" id="lb">
+  <div class="lb-head">
+    <h2>Round <span id="roundNo">&ndash;</span></h2>
+    <span class="entries" id="entries">0 entries</span>
+  </div>
+  <ol class="lb-list" id="lbList"></ol>
+  <p class="lb-empty" id="lbEmpty">No ranked scores yet this round. Be first.</p>
+  <div class="prev" id="prevRound"></div>
+</aside>
+
+<div class="hud" id="hud" hidden>
+  <div id="score">0</div>
+  <div class="mode-badge" id="modeBadge">Practice</div>
+</div>
+
+<div id="toast" aria-live="polite"></div>
+
+<section class="overlay" id="menu">
+  <div class="menu-top">
+    <h1 class="logo">CROSSY</h1>
+    <p class="tag">Hop as far as you can. The best ranked score when the clock hits zero takes the whole pool.</p>
+  </div>
+  <div class="panel">
+    <div class="seg" role="radiogroup" aria-label="Mode">
+      <button type="button" role="radio" data-mode="ranked" id="modeRanked">Ranked<small id="entryPrice">0.05 SOL</small></button>
+      <button type="button" role="radio" data-mode="practice" id="modePractice">Practice<small>Free &middot; not ranked</small></button>
+    </div>
+    <div class="picker">
+      <button type="button" class="arrow" id="prevC" aria-label="Previous character">&lsaquo;</button>
+      <div class="cinfo">
+        <div id="cname">Chicken</div>
+        <div id="cstat">Owned</div>
+      </div>
+      <button type="button" class="buy" id="buyBtn" hidden>Buy</button>
+      <button type="button" class="arrow" id="nextC" aria-label="Next character">&rsaquo;</button>
+    </div>
+    <button type="button" class="cta" id="primary">Play</button>
+    <p class="note" id="modeNote"></p>
+    <button type="button" class="nag" id="backupNag" hidden>Your wallet holds SOL and is not backed up. Export the key now.</button>
+    <p class="msg" id="msg" role="alert" hidden></p>
+  </div>
+</section>
+
+<section class="overlay center" id="over" hidden>
+  <div class="card">
+    <div class="eyebrow" id="deathMsg">Hit by traffic</div>
+    <div class="big" id="finalScore">0</div>
+    <div class="result" id="result"></div>
+    <div class="actions">
+      <button type="button" class="cta" id="againBtn">Play again</button>
+      <button type="button" class="ghost" id="menuBtn">Menu</button>
+    </div>
+  </div>
+</section>
+
+<section class="modal" id="walletModal" hidden role="dialog" aria-modal="true" aria-labelledby="wmTitle">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h2 id="wmTitle">Your Crossy wallet</h2>
+      <button type="button" class="x" id="wmClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="bal">
+      <span>Balance</span>
+      <b class="sol" id="wmBal">&ndash;</b>
+      <button type="button" class="mini" id="wmRefresh">Refresh</button>
+    </div>
+    <div class="field">
+      <span class="flabel">Add SOL</span>
+      <div class="addrbox"><code id="wmAddr"></code><button type="button" class="mini" id="wmCopy">Copy</button></div>
+      <p class="hint">Send SOL on the Solana network to this address from an exchange or another wallet. It shows up here in a few seconds. Prizes you win are paid here too.</p>
+    </div>
+    <details id="wmWithdraw">
+      <summary>Withdraw</summary>
+      <label class="flabel" for="wdTo">To address</label>
+      <input id="wdTo" type="text" autocomplete="off" spellcheck="false" placeholder="Solana address">
+      <label class="flabel" for="wdAmt">Amount in SOL</label>
+      <div class="row"><input id="wdAmt" type="text" inputmode="decimal" autocomplete="off" placeholder="0.25"><button type="button" class="mini" id="wdMax">Max</button></div>
+      <button type="button" class="cta small" id="wdSend">Send</button>
+    </details>
+    <details id="wmExport">
+      <summary>Export private key</summary>
+      <p class="warn">This key is the wallet. Anyone who has it can take your SOL, and Crossy cannot recover it if you lose it. It also imports into Phantom or Solflare.</p>
+      <button type="button" class="mini" id="exReveal">Show key</button>
+      <div class="addrbox" id="exBox" hidden><code id="exKey"></code><button type="button" class="mini" id="exCopy">Copy</button></div>
+    </details>
+    <details id="wmImport">
+      <summary>Use a different wallet</summary>
+      <p class="warn">This replaces the wallet on this device. Export the current key first, or any SOL in it is lost.</p>
+      <label class="flabel" for="imKey">Private key</label>
+      <textarea id="imKey" rows="2" autocomplete="off" spellcheck="false" placeholder="Base58 key or JSON array"></textarea>
+      <button type="button" class="ghost" id="imBtn">Replace wallet</button>
+    </details>
+    <p class="msg" id="wmMsg" role="alert" hidden></p>
+  </div>
+</section>
+
+<div class="busy" id="busy" hidden>
+  <div class="spinner"></div>
+  <p id="busyMsg">Waiting for your wallet</p>
+</div>
+<div class="busy" id="paused" hidden><p>Paused</p><small>Tap or press P to keep going</small></div>
+
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/web3.min.js"></script>
+<script src="/sim.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
