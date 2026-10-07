@@ -19,9 +19,10 @@ that browser and never reaches the server. Players add SOL by sending it to thei
 the key (it imports into Phantom or Solflare) or switch to another key from the Wallet button. The page nags players
 to export once their wallet holds SOL, because clearing browser data deletes the key.
 
-**Paying.** Entries (0.05 SOL) and character purchases go to the receiving wallet set in `RECEIVER_WALLET`.
-The server builds each transfer with a unique reference key, the browser signs it, and the server confirms it on
-chain before handing out a run ticket or a character. Each signature can only be used once. Characters must be
+**Paying.** Entries (0.05 SOL) and character purchases go straight to the receiving wallet set in `RECEIVER_WALLET`.
+The browser builds and signs each transfer, tagged with a unique reference address from the server, and the server
+checks on Solana's public network that the wallet received it before handing out a run ticket or a character.
+The server uses no Solana library and needs no RPC setting. Each signature can only be used once. Characters must be
 owned to be played, in practice and in ranked, and the server checks ownership when a ranked run starts.
 
 **Live updates.** Every open page refreshes the round every 2 seconds, and right away when the tab comes back,
@@ -61,7 +62,6 @@ npm test                  # replay determinism and forgery checks (no network)
    That adds `DATABASE_URL` for you. Without it the game still loads, but the page says "No database connected".
 3. In **Settings → Environment Variables**, add:
    - `ADMIN_TOKEN`: a long random password for `/admin.html`
-   - `RPC_URL`: your paid Solana RPC URL (Helius, Triton, QuickNode). The public one is rate-limited.
    - optional: `RECEIVER_WALLET`, `ENTRY_SOL`, `BASE_POOL_SOL`, `ROUND_MINUTES` and skin prices (see `.env.example`)
 4. Redeploy (Deployments → latest → Redeploy) so the new variables apply.
 5. Add `crossy.fun` under **Settings → Domains**.

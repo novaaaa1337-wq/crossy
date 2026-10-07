@@ -20,8 +20,6 @@ function money(name, fallback) {
 
 module.exports = {
   port: Number(env('PORT')) || 3000,
-  cluster: env('CLUSTER') || 'mainnet-beta',               // 'mainnet-beta' or 'devnet'
-  rpcUrl: env('RPC_URL') || 'https://api.mainnet-beta.solana.com',
   // Receives every entry fee and skin purchase.
   receiver: env('RECEIVER_WALLET') || '6s88p25hjVgESfoa9mSwqwmyDV2AT2hrVWgGZ6SLiTt7',
   // Password for /admin.html, where round winners are listed and payouts are marked as sent.

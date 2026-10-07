@@ -411,8 +411,12 @@ async function pay(kind, skin) {
   if (rest > 0 && rest < RENT_MIN) {
     throw new Error(`Solana requires a wallet to keep at least ${fmtSol(RENT_MIN)} or be empty. Add a little more SOL and try again.`);
   }
-  const tx = solanaWeb3.Transaction.from(b64ToBytes(intent.tx));
-  tx.partialSign(keypair);
+  // Build the transfer here: entry fee straight to the receiving wallet, tagged with this payment's reference.
+  const W3 = solanaWeb3;
+  const ix = W3.SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey: new W3.PublicKey(intent.receiver), lamports: intent.lamports });
+  ix.keys.push({ pubkey: new W3.PublicKey(intent.reference), isSigner: false, isWritable: false });
+  const tx = new W3.Transaction({ feePayer: keypair.publicKey, blockhash: intent.blockhash, lastValidBlockHeight: intent.lastValidBlockHeight }).add(ix);
+  tx.sign(keypair);
   busy(`Paying ${fmtSol(intent.lamports)}`);
   const { signature } = await api('/api/relay', { intentId: intent.intentId, tx: bytesToB64(tx.serialize()) });
   store.set('pending', { intentId: intent.intentId, signature, wallet });
@@ -449,17 +453,30 @@ async function withdraw() {
   wmMsg('');
   const to = $('wdTo').value.trim(), amount = $('wdAmt').value.trim(), max = amount.toLowerCase() === 'max';
   if (!to) { wmMsg('Enter the Solana address to send to.'); return; }
+  let toKey;
+  try { toKey = new solanaWeb3.PublicKey(to); } catch (e) { wmMsg('That is not a valid Solana address.'); return; }
+  if (to === wallet) { wmMsg('That is this wallet. Enter a different address.'); return; }
   if (!max && !/^\d+(\.\d{1,9})?$/.test(amount)) { wmMsg('Enter an amount in SOL, like 0.25, or press Max.'); return; }
   try {
     busy('Preparing withdrawal');
-    const r = await api('/api/withdraw-tx', { from: wallet, to, sol: max ? null : amount, max });
-    const tx = solanaWeb3.Transaction.from(b64ToBytes(r.tx));
-    tx.partialSign(keypair);
-    busy(`Sending ${fmtSol(r.lamports)}`);
+    const bal = await refreshBalance();
+    if (bal == null) throw new Error('Could not read your balance. Try again in a moment.');
+    let lamports;
+    if (max) lamports = bal - FEE;
+    else { const [i, f = ''] = amount.split('.'); lamports = Number(BigInt(i) * 1000000000n + BigInt((f + '000000000').slice(0, 9))); }
+    if (lamports <= 0) throw new Error('There is nothing to withdraw.');
+    if (lamports + FEE > bal) throw new Error(`Not enough SOL. You can send up to ${fmtSol(Math.max(0, bal - FEE))}.`);
+    const rest = bal - lamports - FEE;
+    if (rest > 0 && rest < RENT_MIN) throw new Error(`Solana requires leaving at least ${fmtSol(RENT_MIN)} or nothing. Send a little less, or press Max.`);
+    const { blockhash, lastValidBlockHeight } = await api('/api/blockhash');
+    const tx = new solanaWeb3.Transaction({ feePayer: keypair.publicKey, blockhash, lastValidBlockHeight })
+      .add(solanaWeb3.SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey: toKey, lamports }));
+    tx.sign(keypair);
+    busy(`Sending ${fmtSol(lamports)}`);
     const { signature } = await api('/api/send', { tx: bytesToB64(tx.serialize()) });
     await waitForSignature(signature);
     idle(); $('wdAmt').value = '';
-    wmMsg(`Sent ${fmtSol(r.lamports)} to ${short(to)}.`, true);
+    wmMsg(`Sent ${fmtSol(lamports)} to ${short(to)}.`, true);
     refreshBalance();
   } catch (e) { idle(); wmMsg(e.message); }
 }

@@ -11,8 +11,7 @@
     "build": "node scripts/copy-vendor.js",
     "prestart": "node scripts/copy-vendor.js",
     "start": "node --env-file-if-exists=.env local-server.js",
-    "test": "node scripts/test-sim.js",
-    "e2e": "node --env-file-if-exists=.env scripts/e2e-devnet.js"
+    "test": "node scripts/test-sim.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
