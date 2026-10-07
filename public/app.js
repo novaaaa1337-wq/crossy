@@ -646,7 +646,7 @@ async function pollRound() {
   try { applyRound(await api('/api/round')); }
   catch (e) {
     roundError = e.status === 503 ? e.message
-      : 'The leaderboard server is not answering right now. Ranked play is paused until it is back.';
+      : `The game server returned an error${e.status ? ` (${e.status})` : ''}: ${e.message}. Ranked play is paused. Open /api/health on this site to see what is failing.`;
     if (!roundInfo || roundInfo.offline) { roundInfo = offlineRound(); renderRound(); }
     if (state === 'menu') showMsg(roundError);
   }
